@@ -2,6 +2,14 @@
 name = "terminal-fps"
 version = "0.1.0"
 edition = "2021"
+authors = ["unrenamed <renkonazbka@gmail.com>"]
+description = "A command-line FPS written in Rust"
+readme = "README.md"
+license = "MIT"
+homepage = "https://github.com/unrenamed/terminal-fps"
+repository = "https://github.com/unrenamed/terminal-fps"
+keywords = ["dungeon-crawler", "ray-casting", "pseudo-3d"]
+categories = ["games"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
