@@ -25,11 +25,13 @@ fn main() -> Result<()> {
     let mut tp1 = Instant::now();
 
     loop {
+        // Time differential per frame to ensure consistent movement when CPU loads/unloads
         let tp2 = Instant::now();
         let elapsed_time_duration = tp2 - tp1;
         tp1 = tp2;
         let elapsed_time = elapsed_time_duration.as_secs_f32();
 
+        // Wait 5 millis for a keyboard event to occur
         if poll(Duration::from_millis(5))? {
             if let Event::Key(key) = read()? {
                 match key.code {
@@ -44,6 +46,7 @@ fn main() -> Result<()> {
                             player.a().sin() * SPEED * elapsed_time,
                             player.a().cos() * SPEED * elapsed_time,
                         );
+                        // Handle collision
                         if MAP[player.x() as usize * MAP_WIDTH + player.y() as usize] == '#' {
                             player.move_back(
                                 player.a().sin() * SPEED * elapsed_time,
@@ -56,6 +59,7 @@ fn main() -> Result<()> {
                             player.a().sin() * SPEED * elapsed_time,
                             player.a().cos() * SPEED * elapsed_time,
                         );
+                        // Handle collision
                         if MAP[player.x() as usize * MAP_WIDTH + player.y() as usize] == '#' {
                             player.move_forward(
                                 player.a().sin() * SPEED * elapsed_time,
@@ -63,6 +67,7 @@ fn main() -> Result<()> {
                             );
                         }
                     }
+                    // Exit game
                     KeyCode::Esc => {
                         break;
                     }
@@ -77,12 +82,14 @@ fn main() -> Result<()> {
             let mut distance_to_wall = 0.0 as f32;
             let step_size = 0.1 as f32;
 
-            let mut hit_wall = false;
-            let mut boundary = false;
+            let mut hit_wall = false; // Set when a ray hits a wall
+            let mut boundary = false; // Set when a ray hits a corner of a wall
 
             let eye_x = ray_angle.sin();
             let eye_y = ray_angle.cos();
 
+            // Incrementally cast ray from player, along ray angle, testing for
+            // intersection with a block
             while !hit_wall && distance_to_wall < DEPTH {
                 distance_to_wall += step_size;
                 let cx = (player.x() + eye_x * distance_to_wall) as usize;
@@ -91,8 +98,13 @@ fn main() -> Result<()> {
                     hit_wall = true;
                     distance_to_wall = DEPTH;
                 } else if MAP[(cx * MAP_WIDTH + cy)] == '#' {
+                    // Ray is inbounds so test to see if the ray cell is a wall block
                     hit_wall = true;
 
+                    // To highlight wall boundaries, cast a ray from each corner
+                    // of the tile to the player. The more coincident this ray
+                    // is to the rendering ray, the closer we are to a tile
+                    // boundary, which we'll shade to add detail to the walls
                     let mut wall_corners: Vec<(f32, f32)> = Vec::new();
                     for tx in 0..2 {
                         for ty in 0..2 {
@@ -104,10 +116,10 @@ fn main() -> Result<()> {
                         }
                     }
 
-                    // sort Pairs from closest to farthest
+                    // Sort Pairs from closest to farthest
                     wall_corners.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-                    // first three are closest (we will never see all four)
+                    // First three are closest (we will never see all four)
                     let bound = 0.01;
                     if let [(_, y1), (_, y2), (_, y3), _] = wall_corners.as_slice() {
                         if y1.acos() < bound || y2.acos() < bound || y3.acos() < bound {
@@ -122,6 +134,7 @@ fn main() -> Result<()> {
 
             let mut shade: char;
 
+            // Shade walls based on distance
             match distance_to_wall {
                 d if d <= DEPTH / 4.0 => shade = Shade::WALL_FULL,
                 d if d < DEPTH / 3.0 => shade = Shade::WALL_DARK,
@@ -142,6 +155,7 @@ fn main() -> Result<()> {
                 } else if y as f32 > ceiling && y as f32 <= floor {
                     screen[idx] = shade;
                 } else if y as f32 > floor {
+                    // Shade floor based on distance
                     let b = 1.0
                         - ((y as f32 - SCREEN_HEIGHT as f32 / 2.0) / (SCREEN_HEIGHT as f32 / 2.0));
                     match b {
@@ -156,7 +170,7 @@ fn main() -> Result<()> {
             }
         }
 
-        // build map
+        // Build map
         for nx in 0..MAP_WIDTH {
             for ny in 0..MAP_HEIGHT {
                 screen[ny * SCREEN_WIDTH + nx] = MAP[ny * MAP_WIDTH + nx];
@@ -164,10 +178,10 @@ fn main() -> Result<()> {
         }
         screen[player.x() as usize * SCREEN_WIDTH + player.y() as usize] = 'P';
 
-        // clean screen
+        // Clean screen
         write!(lock, "\r\x1b[H")?;
 
-        // display stats
+        // Display stats
         writeln!(
             lock,
             "\r\x1b[KX: {:.2}, Y: {:.2}, A: {:.2}, FPS: {:.2}",
@@ -177,13 +191,13 @@ fn main() -> Result<()> {
             1.0 / elapsed_time
         )?;
 
-        // display frame with map
+        // Display frame with map
         write!(lock, "\r\x1b[K")?;
         for ny in 0..SCREEN_HEIGHT {
             for nx in 0..SCREEN_WIDTH {
                 write!(lock, "{}", screen[ny * SCREEN_WIDTH + nx])?;
             }
-            writeln!(lock, "\r")?; // move to the beginning of the next line
+            writeln!(lock, "\r")?; // Move to the beginning of the next line
         }
 
         lock.flush()?;
