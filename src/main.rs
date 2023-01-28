@@ -4,19 +4,14 @@ use crossterm::terminal::{
 };
 use crossterm::{cursor, execute};
 use eyre::Result;
-use std::f32::consts::PI;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-const SCREEN_WIDTH: usize = 120;
-const SCREEN_HEIGHT: usize = 40;
+mod player;
+mod utils;
 
-const MAP_HEIGHT: usize = 16;
-const MAP_WIDTH: usize = 16;
-
-const FOV: f32 = PI / 4.0;
-const DEPTH: f32 = 16.0;
-const SPEED: f32 = 5.0;
+use player::Player;
+use utils::*;
 
 fn main() -> Result<()> {
     enable_raw_mode()?;
@@ -24,30 +19,9 @@ fn main() -> Result<()> {
     let mut lock = stdout.lock();
     execute!(lock, EnterAlternateScreen, cursor::Hide)?;
 
-    let mut player_x: f32 = 2.0;
-    let mut player_y: f32 = 2.0;
-    let mut player_a: f32 = 0.0;
+    let mut player = Player::new(2.0, 2.0, 0.0);
 
-    let mut screen = [' '; SCREEN_WIDTH * SCREEN_HEIGHT];
-    let map = [
-        '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#', '.', '#',
-        '#', '.', '.', '#', '#', '#', '#', '#', '#', '#', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '#', '#', '.', '.', '.', '#', '#', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '#',
-        '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#',
-    ];
-
+    let mut screen = [Shade::EMPTY; SCREEN_WIDTH * SCREEN_HEIGHT];
     let mut tp1 = Instant::now();
 
     loop {
@@ -60,25 +34,33 @@ fn main() -> Result<()> {
             if let Event::Key(key) = read()? {
                 match key.code {
                     KeyCode::Left | KeyCode::Char('a') => {
-                        player_a -= SPEED * 0.75 * elapsed_time;
+                        player.turn_left(SPEED * 0.75 * elapsed_time);
                     }
                     KeyCode::Right | KeyCode::Char('d') => {
-                        player_a += SPEED * 0.75 * elapsed_time;
+                        player.turn_right(SPEED * 0.75 * elapsed_time);
                     }
                     KeyCode::Up | KeyCode::Char('w') => {
-                        player_x += player_a.sin() * SPEED * elapsed_time;
-                        player_y += player_a.cos() * SPEED * elapsed_time;
-                        if map[player_x as usize * MAP_WIDTH + player_y as usize] == '#' {
-                            player_x -= player_a.sin() * SPEED * elapsed_time;
-                            player_y -= player_a.cos() * SPEED * elapsed_time;
+                        player.move_forward(
+                            player.a().sin() * SPEED * elapsed_time,
+                            player.a().cos() * SPEED * elapsed_time,
+                        );
+                        if MAP[player.x() as usize * MAP_WIDTH + player.y() as usize] == '#' {
+                            player.move_back(
+                                player.a().sin() * SPEED * elapsed_time,
+                                player.a().cos() * SPEED * elapsed_time,
+                            );
                         }
                     }
                     KeyCode::Down | KeyCode::Char('s') => {
-                        player_x -= player_a.sin() * SPEED * elapsed_time;
-                        player_y -= player_a.cos() * SPEED * elapsed_time;
-                        if map[player_x as usize * MAP_WIDTH + player_y as usize] == '#' {
-                            player_x += player_a.sin() * SPEED * elapsed_time;
-                            player_y += player_a.cos() * SPEED * elapsed_time;
+                        player.move_back(
+                            player.a().sin() * SPEED * elapsed_time,
+                            player.a().cos() * SPEED * elapsed_time,
+                        );
+                        if MAP[player.x() as usize * MAP_WIDTH + player.y() as usize] == '#' {
+                            player.move_forward(
+                                player.a().sin() * SPEED * elapsed_time,
+                                player.a().cos() * SPEED * elapsed_time,
+                            );
                         }
                     }
                     KeyCode::Esc => {
@@ -90,7 +72,7 @@ fn main() -> Result<()> {
         }
 
         for x in 0..SCREEN_WIDTH {
-            let ray_angle = (player_a - FOV / 2.0) + (x as f32 / SCREEN_WIDTH as f32) * FOV;
+            let ray_angle = (player.a() - FOV / 2.0) + (x as f32 / SCREEN_WIDTH as f32) * FOV;
 
             let mut distance_to_wall = 0.0 as f32;
             let step_size = 0.1 as f32;
@@ -103,19 +85,19 @@ fn main() -> Result<()> {
 
             while !hit_wall && distance_to_wall < DEPTH {
                 distance_to_wall += step_size;
-                let cx = (player_x + eye_x * distance_to_wall) as usize;
-                let cy = (player_y + eye_y * distance_to_wall) as usize;
+                let cx = (player.x() + eye_x * distance_to_wall) as usize;
+                let cy = (player.y() + eye_y * distance_to_wall) as usize;
                 if cx >= MAP_WIDTH || cy >= MAP_HEIGHT {
                     hit_wall = true;
                     distance_to_wall = DEPTH;
-                } else if map[(cx * MAP_WIDTH + cy)] == '#' {
+                } else if MAP[(cx * MAP_WIDTH + cy)] == '#' {
                     hit_wall = true;
 
                     let mut wall_corners: Vec<(f32, f32)> = Vec::new();
                     for tx in 0..2 {
                         for ty in 0..2 {
-                            let vy = (cy as f32) + (ty as f32) - player_y;
-                            let vx = (cx as f32) + (tx as f32) - player_x;
+                            let vy = (cy as f32) + (ty as f32) - player.y();
+                            let vx = (cx as f32) + (tx as f32) - player.x();
                             let d = (vx * vx + vy * vy).sqrt();
                             let dot = (eye_x * vx / d) + (eye_y * vy / d);
                             wall_corners.push((d, dot));
@@ -127,18 +109,8 @@ fn main() -> Result<()> {
 
                     // first three are closest (we will never see all four)
                     let bound = 0.01;
-                    if let Some(b) = wall_corners.get(0) {
-                        if b.1.acos() < bound {
-                            boundary = true;
-                        }
-                    }
-                    if let Some(b) = wall_corners.get(1) {
-                        if b.1.acos() < bound {
-                            boundary = true;
-                        }
-                    }
-                    if let Some(b) = wall_corners.get(2) {
-                        if b.1.acos() < bound {
+                    if let [(_, y1), (_, y2), (_, y3), _] = wall_corners.as_slice() {
+                        if y1.acos() < bound || y2.acos() < bound || y3.acos() < bound {
                             boundary = true;
                         }
                     }
@@ -151,33 +123,33 @@ fn main() -> Result<()> {
             let mut shade: char;
 
             match distance_to_wall {
-                d if d <= DEPTH / 4.0 => shade = '\u{2588}',
-                d if d < DEPTH / 3.0 => shade = '\u{2593}',
-                d if d < DEPTH / 2.0 => shade = '\u{2592}',
-                d if d < DEPTH => shade = '\u{2591}',
-                _ => shade = ' ',
+                d if d <= DEPTH / 4.0 => shade = Shade::WALL_FULL,
+                d if d < DEPTH / 3.0 => shade = Shade::WALL_DARK,
+                d if d < DEPTH / 2.0 => shade = Shade::WALL_MEDIUM,
+                d if d < DEPTH => shade = Shade::WALL_LIGHT,
+                _ => shade = Shade::EMPTY,
             }
 
             if boundary {
-                shade = ' ';
+                shade = Shade::EMPTY;
             }
 
             for y in 0..SCREEN_HEIGHT {
                 let idx = y * SCREEN_WIDTH + x;
 
                 if y as f32 <= ceiling {
-                    screen[idx] = ' ';
+                    screen[idx] = Shade::EMPTY;
                 } else if y as f32 > ceiling && y as f32 <= floor {
                     screen[idx] = shade;
-                } else {
+                } else if y as f32 > floor {
                     let b = 1.0
                         - ((y as f32 - SCREEN_HEIGHT as f32 / 2.0) / (SCREEN_HEIGHT as f32 / 2.0));
                     match b {
-                        v if v < 0.25 => shade = '#',
-                        v if v < 0.5 => shade = 'x',
-                        v if v < 0.75 => shade = '~',
-                        v if v < 0.9 => shade = '-',
-                        _ => shade = ' ',
+                        v if v < 0.25 => shade = Shade::FLOOR_DARK,
+                        v if v < 0.5 => shade = Shade::FLOOR_MEDIUM,
+                        v if v < 0.75 => shade = Shade::FLOOR_LIGHT,
+                        v if v < 0.9 => shade = Shade::FLOOR_DIM,
+                        _ => shade = Shade::EMPTY,
                     }
                     screen[idx] = shade;
                 }
@@ -187,21 +159,21 @@ fn main() -> Result<()> {
         // build map
         for nx in 0..MAP_WIDTH {
             for ny in 0..MAP_HEIGHT {
-                screen[(ny) * SCREEN_WIDTH + nx] = map[ny * MAP_WIDTH + nx];
+                screen[ny * SCREEN_WIDTH + nx] = MAP[ny * MAP_WIDTH + nx];
             }
         }
-        screen[player_x as usize * SCREEN_WIDTH + player_y as usize] = 'P';
+        screen[player.x() as usize * SCREEN_WIDTH + player.y() as usize] = 'P';
 
         // clean screen
         write!(lock, "\r\x1b[H")?;
-        
+
         // display stats
         writeln!(
             lock,
             "\r\x1b[KX: {:.2}, Y: {:.2}, A: {:.2}, FPS: {:.2}",
-            player_x,
-            player_y,
-            player_a,
+            player.x(),
+            player.y(),
+            player.a(),
             1.0 / elapsed_time
         )?;
 
